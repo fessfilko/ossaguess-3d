@@ -36,12 +36,17 @@ input[type=text]{width:100%;box-sizing:border-box;padding:12px;font-size:1rem;bo
 .row b{flex:1;min-width:0}
 .row i{font-style:normal;font-size:.85rem;text-align:right;white-space:nowrap}
 button{padding:8px 12px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--fg);font-size:.85rem;cursor:pointer}
+button.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+#fix{margin-top:8px;font-size:.9rem;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+#fix:empty{display:none}
+#timer{font-variant-numeric:tabular-nums;font-size:1.05rem}
+select{padding:7px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
 footer{grid-column:1/-1;font-size:.75rem;color:var(--mut);line-height:1.5}
 </style>
 </head>
 <body>
 <main>
-<h1>Ossa 3D – hádaj kosť<small>Hádaj skrytú kosť podľa latinského názvu. Tipnuté kosti sa na 3D kostre zafarbia: červená = horúco, modrá = ľadovo. Model otáčaj ťahaním, približuj kolieskom alebo dvoma prstami.</small></h1>
+<h1>Ossa 3D – hádaj kosť<small>Dva režimy: hádaj skrytú kosť podľa latinského názvu, alebo pomenuj všetky kosti na čas. Tipnuté kosti sa na 3D kostre zafarbia: červená = horúco, modrá = ľadovo. Model otáčaj ťahaním, približuj kolieskom alebo dvoma prstami.</small></h1>
 <div class="card">
  <div id="view"><div id="load">Načítavam model kostry…</div><div id="tip"></div></div>
  <div class="bar">
@@ -50,10 +55,17 @@ footer{grid-column:1/-1;font-size:.75rem;color:var(--mut);line-height:1.5}
  </div>
 </div>
 <div>
- <div id="box"><input type="text" id="in" placeholder="Napíš latinský názov, napr. Humerus dexter" autocomplete="off"><ul id="sug"></ul></div>
+ <div class="bar" style="margin-top:0">
+  <button id="m1" class="on">Hádaj kosť</button><button id="m2">Pomenuj všetky</button>
+  <label id="hardL"><input type="checkbox" id="hard"> Bez nápovedy (píšeš sám)</label>
+ </div>
+ <div id="box" style="margin-top:10px"><input type="text" id="in" placeholder="Napíš latinský názov, napr. Humerus dexter" autocomplete="off"><ul id="sug"></ul></div>
+ <div id="fix"></div>
  <div id="msg"></div>
  <div id="list"></div>
- <div class="bar"><button id="bd">Denná kosť</button><button id="br">Náhodná kosť</button><button id="bg">Vzdať sa</button></div>
+ <div class="bar"><button id="bn">Nové kolo</button><button id="bd">Denná kosť</button><button id="bg">Vzdať sa</button>
+  <span id="t2" style="display:none"><label>Čas: <select id="lim"><option value="0">bez limitu</option><option value="10">10 min</option><option value="20">20 min</option><option value="30" selected>30 min</option><option value="60">60 min</option></select></label> <b id="timer">00:00</b></span>
+ </div>
 </div>
 <footer>3D dáta: BodyParts3D 4.0, © The Database Center for Life Science, licencia CC BY 4.0 (dbarchive.biosciencedbc.jp/en/bodyparts3d). Upravené (zjednodušené a prevedené) projektom Human Atlas (github.com/ashemag/human-atlas, MIT). Výber kostí, latinské názvy a hra: tento projekt. Latinské názvy sú odvodené programovo z anglických, stačí ich preveriť v atlase.</footer>
 </main>
@@ -80,16 +92,21 @@ new ResizeObserver(fit).observe(wrap);fit();
 (function loop(){requestAnimationFrame(loop);controls.update();renderer.render(scene,camera)})();
 document.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>setView(b.dataset.v.split(",").map(Number)));
 
-let target,guesses=[],over=false,allMeshes=[];
+let mode=1,target,guesses=[],found=[],over=false,won=false,endNote="",endMs=0,allMeshes=[],bag=[],lastT=null,t0=0,limit=0,timer=null,ready=false;
 const hue=d=>Math.min(d/100,1)*210;
 const gcol=d=>new THREE.Color().setHSL(hue(d)/360,0.8,0.5);
+const GREEN=new THREE.Color(0x2ea44f),RED=new THREE.Color(0xd04040);
 const label=d=>d===0?"Správne! 🎉":d<3?"Pálí!":d<8?"Horúco":d<20?"Teplo":d<40?"Vlažno":d<70?"Chladno":"Ľadovo";
 const dist=(a,b)=>Math.hypot(a.c[0]-b.c[0],a.c[1]-b.c[1],a.c[2]-b.c[2])*100;
+const fmt=ms=>{ms=Math.max(0,Math.floor(ms/1000));return String(Math.floor(ms/60)).padStart(2,"0")+":"+String(ms%60).padStart(2,"0")};
+function lev(a,b){const m=a.length,n=b.length;let p=Array.from({length:n+1},(_,j)=>j);for(let i=1;i<=m;i++){const c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c}return p[n]}
+const row=(col,e,right)=>`<div class="row"><span class="chip" style="background:${col}"></span><b>${e.n}<br><span class="sk">${e.e}</span></b>${right?`<i>${right}</i>`:""}</div>`;
 
 async function init(){
  const raw=Uint8Array.from(atob(B64),c=>c.charCodeAt(0));
  const buf=await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
  META.forEach(e=>{
+  e.k=norm(e.n.replace(/\s*\(.*\)/,""));
   e.mat=new THREE.MeshStandardMaterial({color:baseCol(),roughness:0.65,metalness:0,side:THREE.DoubleSide});
   e.meshes=e.m.map(([vo,vc,io,ic,mn,sc])=>{
    const q=new Uint16Array(buf,vo,vc*3),p=new Float32Array(vc*3);
@@ -101,45 +118,101 @@ async function init(){
    const m=new THREE.Mesh(g,e.mat);m.userData.e=e;scene.add(m);allMeshes.push(m);return m;
   });
  });
- $("#load").remove();start(true);
+ $("#load").remove();ready=true;newRound();
 }
-function start(daily){
- if(daily){const d=new Date(),k=d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();target=META[(Math.imul(k,2654435761)>>>0)%META.length]}
- else target=META[Math.floor(Math.random()*META.length)];
- guesses=[];over=false;$("#in").value="";$("#sug").innerHTML="";render();
+function nextTarget(){
+ if(!bag.length){
+  bag=META.map((_,i)=>i);
+  for(let i=bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[bag[i],bag[j]]=[bag[j],bag[i]]}
+  if(lastT!==null&&bag[bag.length-1]===lastT)bag.unshift(bag.pop());
+ }
+ lastT=bag.pop();return META[lastT];
 }
-function guess(e){
- if(over||guesses.some(g=>g.e===e))return;
- guesses.push({e,d:e===target?0:dist(e,target)});
- if(e===target)over=true;
- $("#in").value="";$("#sug").innerHTML="";render();
+function dailyBone(){const d=new Date(),k=d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();return META[(Math.imul(k,2654435761)>>>0)%META.length]}
+function stopTimer(){clearInterval(timer);timer=null}
+function tickT(){const el=Date.now()-t0;if(limit&&el>=limit){finish(false,"Čas vypršal");return}$("#timer").textContent=fmt(limit?limit-el:el)}
+function startTimer(){if(timer||over)return;t0=Date.now();timer=setInterval(tickT,250);tickT()}
+function finish(w,note){if(over)return;endMs=Date.now()-t0;over=true;won=w;endNote=note;stopTimer();render()}
+function clearIn(){$("#in").value="";$("#sug").innerHTML="";$("#fix").innerHTML=""}
+function newRound(daily){
+ stopTimer();guesses=[];found=[];over=false;won=false;endNote="";endMs=0;
+ limit=mode===2?(+$("#lim").value)*60000:0;
+ if(mode===1)target=daily?dailyBone():nextTarget();
+ $("#timer").textContent=fmt(limit);
+ clearIn();render();
+}
+function accept(e){
+ if(over)return;
+ const dup=mode===1?guesses.some(g=>g.e===e):found.includes(e);
+ if(dup){$("#sug").innerHTML="";$("#fix").textContent="„"+e.n+"“ už si zadal.";return}
+ if(mode===1){guesses.push({e,d:e===target?0:dist(e,target)});if(e===target){won=true;over=true}}
+ else{startTimer();found.push(e);if(found.length===META.length)finish(true,"")}
+ clearIn();render();$("#in").focus();
+}
+function offer(t,list){
+ const fx=$("#fix");fx.textContent=t+" ";
+ list.forEach(e=>{const b=document.createElement("button");b.textContent=e.n;b.onclick=()=>accept(e);fx.appendChild(b)});
+}
+function enter(){
+ const q=norm($("#in").value);if(!q||over)return;
+ const fx=$("#fix");fx.innerHTML="";
+ const ex=META.find(e=>e.k===q);if(ex){accept(ex);return}
+ const f=$("#sug li");if(f){f.click();return}
+ const pre=q.length>=4?META.filter(e=>e.k.startsWith(q)):[];
+ if(pre.length){if(mode===1)offer("Upresni názov, myslel si niektorú z týchto?",pre.slice(0,6));else fx.textContent="Upresni názov (strana dexter / sinister, číslo...).";return}
+ const lim=Math.max(2,Math.floor(q.length*0.25));
+ const good=META.map(e=>({e,d:lev(q,e.k)})).filter(x=>x.d<=lim).sort((a,b)=>a.d-b.d).slice(0,3).map(x=>x.e);
+ if(good.length)offer("Myslel si toto?",good);
+ else fx.textContent="Taká kosť neexistuje. Skontroluj latinský názov (aj so stranou: dexter / sinister).";
 }
 function recolor(){
- const last=guesses[guesses.length-1];
  META.forEach(e=>{e.mat.color.copy(baseCol());e.mat.emissive.setRGB(0,0,0)});
- guesses.forEach(g=>{g.e.mat.color.copy(gcol(g.d));g.e.mat.emissive.copy(g.e.mat.color).multiplyScalar(g===last?0.4:0.08)});
- if(over){target.mat.color.set(0xffc93c);target.mat.emissive.set(0x553d00)}
+ if(mode===1){
+  const last=guesses[guesses.length-1];
+  guesses.forEach(g=>{g.e.mat.color.copy(gcol(g.d));g.e.mat.emissive.copy(g.e.mat.color).multiplyScalar(g===last?0.4:0.08)});
+  if(over){target.mat.color.set(0xffc93c);target.mat.emissive.set(0x553d00)}
+ }else{
+  found.forEach((e,i)=>{e.mat.color.copy(GREEN);e.mat.emissive.copy(GREEN).multiplyScalar(i===found.length-1?0.4:0.08)});
+  if(over&&!won)META.forEach(e=>{if(!found.includes(e)){e.mat.color.copy(RED);e.mat.emissive.copy(RED).multiplyScalar(0.1)}});
+ }
 }
 function render(){
- const sorted=[...guesses].sort((a,b)=>a.d-b.d),last=guesses[guesses.length-1];
- $("#list").innerHTML=sorted.map(g=>`<div class="row${g===last?" last":""}"><span class="chip" style="background:${gcol(g.d).getStyle()}"></span><b>${g.e.n}<br><span class="sk">${g.e.e}</span></b><i>${g.d===0?label(0):Math.round(g.d)+" cm · "+label(g.d)}</i></div>`).join("");
- $("#msg").textContent=over?"Hľadaná kosť: "+target.n+" ("+target.e+"). Tipov: "+guesses.length+".":guesses.length?"Tipov: "+guesses.length+" z "+META.length+" kostí":"Zadaj svoj prvý tip. Skrytých kostí je "+META.length+".";
+ if(!ready)return;
+ const L=$("#list"),M=$("#msg");
+ if(mode===1){
+  const sorted=[...guesses].sort((a,b)=>a.d-b.d),last=guesses[guesses.length-1];
+  L.innerHTML=sorted.map(g=>row(gcol(g.d).getStyle(),g.e,g.d===0?label(0):Math.round(g.d)+" cm · "+label(g.d)).replace('class="row"','class="row'+(g===last?" last":"")+'"')).join("");
+  M.textContent=over?(won?"Správne! ":"")+"Hľadaná kosť: "+target.n+" ("+target.e+"). Tipov: "+guesses.length+".":guesses.length?"Tipov: "+guesses.length+" z "+META.length+" kostí":"Zadaj svoj prvý tip. Skrytých kostí je "+META.length+".";
+ }else{
+  let h="";
+  if(over&&!won){const miss=META.filter(e=>!found.includes(e));h+=`<div class="row"><b>Nepomenované (${miss.length})</b></div>`+miss.map(e=>row("#d04040",e)).join("")}
+  h+=[...found].reverse().map(e=>row("#2ea44f",e)).join("");
+  L.innerHTML=h;
+  M.textContent=over?(won?"Zvládol si všetkých "+META.length+" za "+fmt(endMs)+"! 🎉":endNote+". Pomenoval si "+found.length+" z "+META.length+" kostí za "+fmt(endMs)+"."):found.length+" z "+META.length+" kostí. Píš latinské názvy, aj so stranou (dexter / sinister).";
+ }
  $("#in").disabled=over;recolor();
 }
+function setMode(m){
+ mode=m;$("#m1").classList.toggle("on",m===1);$("#m2").classList.toggle("on",m===2);
+ $("#bd").style.display=m===1?"":"none";$("#t2").style.display=m===2?"":"none";$("#hardL").style.display=m===1?"":"none";
+ $("#in").placeholder=m===1?"Napíš latinský názov, napr. Humerus dexter":"Pomenuj kosť a stlač Enter";
+ newRound();
+}
+$("#m1").onclick=()=>setMode(1);$("#m2").onclick=()=>setMode(2);
 $("#in").addEventListener("input",ev=>{
- const q=norm(ev.target.value),ul=$("#sug");ul.innerHTML="";
- if(!q)return;
+ const ul=$("#sug");ul.innerHTML="";$("#fix").innerHTML="";
+ if(mode===2&&!over)startTimer();
+ if(mode!==1||$("#hard").checked)return;
+ const q=norm(ev.target.value);if(!q)return;
  META.filter(e=>!guesses.some(g=>g.e===e)&&norm(e.n+e.e).includes(q)).slice(0,7).forEach(e=>{
-  const li=document.createElement("li");li.innerHTML=e.n+" <span>"+e.e+"</span>";li.onclick=()=>guess(e);ul.appendChild(li)});
+  const li=document.createElement("li");li.innerHTML=e.n+" <span>"+e.e+"</span>";li.onclick=()=>accept(e);ul.appendChild(li)});
 });
-$("#in").addEventListener("keydown",ev=>{
- if(ev.key!=="Enter")return;
- const q=norm($("#in").value),ex=META.find(e=>norm(e.n)===q);
- if(ex)guess(ex);else{const f=$("#sug li");if(f)f.click()}
-});
-$("#bd").onclick=()=>start(true);
-$("#br").onclick=()=>start(false);
-$("#bg").onclick=()=>{if(over||!target)return;over=true;render()};
+$("#hard").onchange=()=>{$("#sug").innerHTML="";$("#in").dispatchEvent(new Event("input"))};
+$("#in").addEventListener("keydown",ev=>{if(ev.key==="Enter")enter()});
+$("#bn").onclick=()=>newRound(false);
+$("#bd").onclick=()=>newRound(true);
+$("#bg").onclick=()=>{if(over||!ready)return;if(mode===1){over=true;render()}else finish(false,"Vzdal si sa")};
+$("#lim").onchange=()=>newRound();
 let down=null;const rc=new THREE.Raycaster();
 renderer.domElement.addEventListener("pointerdown",e=>down=[e.clientX,e.clientY]);
 renderer.domElement.addEventListener("pointerup",e=>{
@@ -147,7 +220,7 @@ renderer.domElement.addEventListener("pointerup",e=>{
  const r=renderer.domElement.getBoundingClientRect();
  rc.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-((e.clientY-r.top)/r.height)*2+1),camera);
  const h=rc.intersectObjects(allMeshes)[0],t=$("#tip");
- if(h){const b=h.object.userData.e;t.textContent=b.n+" – "+b.e;t.style.display="block"}else t.style.display="none";
+ if(h){const b=h.object.userData.e;t.textContent=(mode===2&&!over&&!found.includes(b))?"???  (táto kosť ešte nebola pomenovaná)":b.n+" – "+b.e;t.style.display="block"}else t.style.display="none";
 });
 $("#learn").onchange=e=>{if(!e.target.checked)$("#tip").style.display="none"};
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>META[0].mat&&recolor());
