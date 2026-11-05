@@ -39,34 +39,40 @@ button{padding:8px 12px;border-radius:9px;border:1px solid var(--line);backgroun
 button.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 #fix{margin-top:8px;font-size:.9rem;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 #fix:empty{display:none}
-#timer{font-variant-numeric:tabular-nums;font-size:1.05rem}
+#timer{font-variant-numeric:tabular-nums;font-size:1.4rem}
 select{padding:7px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
+#rb{font-size:.86rem;line-height:1.45}#rb ol{padding-left:18px;margin:6px 0}#rb p{margin:6px 0}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;place-items:center;z-index:40;padding:16px}
+.dlg{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;max-width:420px;width:100%;line-height:1.6}.dlg h2{margin:0 0 8px}
 footer{grid-column:1/-1;font-size:.75rem;color:var(--mut);line-height:1.5}
 </style>
 </head>
 <body>
 <main>
-<h1>Ossa 3D – hádaj kosť<small>Dva režimy: hádaj skrytú kosť podľa latinského názvu, alebo pomenuj všetky kosti na čas. Tipnuté kosti sa na 3D kostre zafarbia: červená = horúco, modrá = ľadovo. Model otáčaj ťahaním, približuj kolieskom alebo dvoma prstami.</small></h1>
+<h1>Ossa 3D – hádaj kosť<small>Tri hry s 3D kostrou: hádaj skrytú kosť, napíš všetky kosti na čas a skús sa naklikať na správne kosti. Model otáčaj ťahaním, približuj kolieskom alebo dvoma prstami.</small></h1>
 <div class="card">
  <div id="view"><div id="load">Načítavam model kostry…</div><div id="tip"></div></div>
  <div class="bar">
   <button data-v="0,0.05,1">Spredu</button><button data-v="0,0.05,-1">Zozadu</button><button data-v="1,0.05,0">Ľavá strana</button><button data-v="-1,0.05,0">Pravá strana</button>
-  <label><input type="checkbox" id="learn"> Učebný režim (klik na kosť prezradí jej názov)</label>
+  <label id="learnL"><input type="checkbox" id="learn"> Učebný režim (klik na kosť prezradí jej názov)</label>
  </div>
 </div>
 <div>
  <div class="bar" style="margin-top:0">
-  <button id="m1" class="on">Hádaj kosť</button><button id="m2">Pomenuj všetky</button>
+  <button id="m1" class="on">🕵️ Kostný detektív</button><button id="m2">⏱ Kostrový maratón</button><button id="m3">🎯 Preskúšaj sa</button>
   <label id="hardL"><input type="checkbox" id="hard"> Bez nápovedy (píšeš sám)</label>
  </div>
+ <details open class="card" style="margin:10px 0"><summary id="rt" style="cursor:pointer;font-weight:700"></summary><div id="rb"></div></details>
+ <div id="lvlW" class="bar" style="display:none;margin:0 0 10px"><label>Úroveň: <select id="lvl"><option value="3">⚡ Bleskovka (3 min)</option><option value="8">🎯 Stredná (8 min)</option><option value="15">🔥 Najťažšia (15 min)</option><option value="0">🧘 Tréning (bez limitu)</option></select></label><button id="go" class="on">Začať</button></div>
  <div id="box" style="margin-top:10px"><input type="text" id="in" placeholder="Napíš latinský názov, napr. Humerus dexter" autocomplete="off"><ul id="sug"></ul></div>
  <div id="fix"></div>
  <div id="msg"></div>
  <div id="list"></div>
- <div class="bar"><button id="bn">Nové kolo</button><button id="bd">Denná kosť</button><button id="bg">Vzdať sa</button>
-  <span id="t2" style="display:none"><label>Čas: <select id="lim"><option value="0">bez limitu</option><option value="10">10 min</option><option value="20">20 min</option><option value="30" selected>30 min</option><option value="60">60 min</option></select></label> <b id="timer">00:00</b></span>
+ <div class="bar"><button id="bn">Nové kolo</button><button id="bd">Denná kosť</button><button id="bg">Vzdať sa</button><button id="sk" style="display:none">Preskočiť</button>
+  <span id="t2" style="display:none">⏱ <b id="timer">00:00</b><span id="best" class="sk"></span></span>
  </div>
 </div>
+<div id="modal"><div class="dlg"><h2 id="mt"></h2><div id="mb"></div><div class="bar" id="mbtn"></div></div></div>
 <footer>3D dáta: BodyParts3D 4.0, © The Database Center for Life Science, licencia CC BY 4.0 (dbarchive.biosciencedbc.jp/en/bodyparts3d). Upravené (zjednodušené a prevedené) projektom Human Atlas (github.com/ashemag/human-atlas, MIT). Výber kostí, latinské názvy a hra: tento projekt. Latinské názvy sú odvodené programovo z anglických, stačí ich preveriť v atlase.</footer>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
@@ -92,15 +98,34 @@ new ResizeObserver(fit).observe(wrap);fit();
 (function loop(){requestAnimationFrame(loop);controls.update();renderer.render(scene,camera)})();
 document.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>setView(b.dataset.v.split(",").map(Number)));
 
-let mode=1,target,guesses=[],found=[],over=false,won=false,endNote="",endMs=0,allMeshes=[],bag=[],lastT=null,t0=0,limit=0,timer=null,ready=false;
+let mode=1,target,guesses=[],found=[],over=false,won=false,endNote="",endMs=0,allMeshes=[],bag=[],lastT=null,t0=0,limit=0,timer=null,ready=false,newBest=false,bag3=[],q3={on:false,ok:0,bad:0,skip:0,log:[]},ft=0;
 const hue=d=>Math.min(d/100,1)*210;
 const gcol=d=>new THREE.Color().setHSL(hue(d)/360,0.8,0.5);
-const GREEN=new THREE.Color(0x2ea44f),RED=new THREE.Color(0xd04040);
+const GREEN=new THREE.Color(0x2ea44f),RED=new THREE.Color(0xd04040),GOLD=new THREE.Color(0xffc93c);
 const label=d=>d===0?"Správne! 🎉":d<3?"Pálí!":d<8?"Horúco":d<20?"Teplo":d<40?"Vlažno":d<70?"Chladno":"Ľadovo";
 const dist=(a,b)=>Math.hypot(a.c[0]-b.c[0],a.c[1]-b.c[1],a.c[2]-b.c[2])*100;
 const fmt=ms=>{ms=Math.max(0,Math.floor(ms/1000));return String(Math.floor(ms/60)).padStart(2,"0")+":"+String(ms%60).padStart(2,"0")};
 function lev(a,b){const m=a.length,n=b.length;let p=Array.from({length:n+1},(_,j)=>j);for(let i=1;i<=m;i++){const c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c}return p[n]}
 const row=(col,e,right)=>`<div class="row"><span class="chip" style="background:${col}"></span><b>${e.n}<br><span class="sk">${e.e}</span></b>${right?`<i>${right}</i>`:""}</div>`;
+const HID=/^(Os ethmoidale|Vomer|Os palatinum)/;
+const bestT=()=>{try{return +localStorage.getItem("ossaBest")||0}catch(e){return 0}};
+const GAMES={
+1:["🕵️ Kostný detektív – hádaj, na akú kosť myslím","<p>Myslím na <b>jednu skrytú kosť</b> z "+META.length+". Tvojou úlohou je dopracovať sa k nej.</p><ol><li>Napíš latinský názov ľubovoľnej kosti (napr. <i>Humerus dexter</i>) a stlač Enter. Dexter = pravá, sinister = ľavá strana tela.</li><li>Tipnutá kosť sa na 3D kostre zafarbí podľa toho, <b>ako ďaleko je od skrytej</b>: červená = pálí, modrá = ľadovo. V zozname uvidíš aj vzdialenosť v cm.</li><li>Podľa farieb sa postupne približuj. Otáčaj kostru a sleduj, kde sú teplé kosti.</li><li>Keď trafíš skrytú kosť, vyhráš (a dostaneš konfety). Tipov môžeš mať koľko chceš, menej je lepšie.</li></ol><p>Ťažšia verzia: zapni <i>Bez nápovedy</i>, píšeš sám bez návrhov. Pri preklepe ti hra ponúkne najpodobnejší názov, pri nezmysle povie, že taká kosť neexistuje.</p>"],
+2:["⏱ Kostrový maratón – všetky kosti na čas","<p>Zvládneš napísať <b>všetky kosti ľudského tela</b> ("+META.length+")?</p><ol><li>Píš latinské názvy v ľubovoľnom poradí a po každom stlač Enter. Pri párových kostiach aj stranu (dexter / sinister), pri stavcoch a rebrách rímske číslo, napr. <i>Costa VIII dextra</i>.</li><li>Správna kosť sa na kostre <b>zafarbí na zeleno</b>. Návrhy nie sú, ale preklepy ti hra opraví.</li><li>Stopky sa spustia pri prvom písmene a bežia, kým nepomenuješ všetky. Čím nižší čas, tým lepšie. Najlepší čas si hra pamätá.</li><li>Ak sa vzdáš, nepomenované kosti sa zafarbia na červeno.</li></ol>"],
+3:["🎯 Preskúšaj sa – nájdi kosť v modeli","<p>Hra ti zadá <b>latinský názov kosti</b> a ty ju musíš <b>nájsť a kliknúť na ňu</b> v 3D modeli (otáčaj ho a približuj).</p><ol><li>Správne = kosť sa zablysne na zeleno a dostaneš ďalšiu.</li><li>Zle = kosť zčervená, hra povie <i>Toto nie je ona</i> a poradí ti smer (vyššie, nižšie, bližšie k stredu tela...).</li><li>Úrovne: ⚡ Bleskovka 3 min, 🎯 Stredná 8 min, 🔥 Najťažšia 15 min. Na konci uvidíš, koľko kostí si trafil a koľkokrát si kliknul na zlú.</li><li>🧘 Tréning je bez časového limitu: hra diktuje a ty len klikáš, skončíš, kedy chceš.</li></ol><p>Kosti ukryté hlboko v lebke tu nie sú. Tlačidlo <i>Preskočiť</i> ti kosť ukáže.</p>"]};
+function confetti(){
+ if(matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+ const c=document.createElement("canvas");c.style.cssText="position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:50";
+ document.body.appendChild(c);c.width=innerWidth;c.height=innerHeight;const x=c.getContext("2d");
+ const P=Array.from({length:170},()=>({x:Math.random()*c.width,y:-Math.random()*c.height*.6,vx:Math.random()*4-2,vy:2+Math.random()*4,s:6+Math.random()*7,r:Math.random()*6,vr:Math.random()*.3-.15,h:Math.random()*360}));
+ let f=0;(function a(){x.clearRect(0,0,c.width,c.height);P.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;x.save();x.translate(p.x,p.y);x.rotate(p.r);x.fillStyle="hsl("+p.h+",85%,55%)";x.fillRect(-p.s/2,-p.s/3,p.s,p.s*.6);x.restore()});if(++f<220)requestAnimationFrame(a);else c.remove()})();
+}
+function showModal(t,b,btns){
+ $("#mt").textContent=t;$("#mb").innerHTML=b;const bx=$("#mbtn");bx.innerHTML="";
+ (btns||[]).concat([["Zavrieť",null]]).forEach(([l,f],i)=>{const x=document.createElement("button");x.textContent=l;if(i===0&&btns&&btns.length)x.className="on";x.onclick=()=>{$("#modal").style.display="none";f&&f()};bx.appendChild(x)});
+ $("#modal").style.display="grid";
+}
+$("#modal").onclick=e=>{if(e.target.id==="modal")$("#modal").style.display="none"};
 
 async function init(){
  const raw=Uint8Array.from(atob(B64),c=>c.charCodeAt(0));
@@ -118,7 +143,7 @@ async function init(){
    const m=new THREE.Mesh(g,e.mat);m.userData.e=e;scene.add(m);allMeshes.push(m);return m;
   });
  });
- $("#load").remove();ready=true;newRound();
+ $("#load").remove();ready=true;setMode(1);
 }
 function nextTarget(){
  if(!bag.length){
@@ -130,15 +155,20 @@ function nextTarget(){
 }
 function dailyBone(){const d=new Date(),k=d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();return META[(Math.imul(k,2654435761)>>>0)%META.length]}
 function stopTimer(){clearInterval(timer);timer=null}
-function tickT(){const el=Date.now()-t0;if(limit&&el>=limit){finish(false,"Čas vypršal");return}$("#timer").textContent=fmt(limit?limit-el:el)}
+function tickT(){const el=Date.now()-t0;if(mode===3&&limit&&el>=limit){end3("⏰ Čas vypršal!");return}$("#timer").textContent=fmt(limit?limit-el:el)}
 function startTimer(){if(timer||over)return;t0=Date.now();timer=setInterval(tickT,250);tickT()}
-function finish(w,note){if(over)return;endMs=Date.now()-t0;over=true;won=w;endNote=note;stopTimer();render()}
+function finish(w,note){
+ if(over)return;endMs=Date.now()-t0;over=true;won=w;endNote=note;stopTimer();
+ if(w&&mode===2){const b=bestT();newBest=!b||endMs<b;if(newBest){try{localStorage.setItem("ossaBest",endMs)}catch(e){}}}
+ render();
+ if(w){confetti();showModal("🏁 Hotovo!","Všetkých "+META.length+" kostí za <b>"+fmt(endMs)+"</b>."+(newBest?"<br>🏆 Nový osobný rekord!":""),[["Hrať znova",()=>newRound()]])}
+}
 function clearIn(){$("#in").value="";$("#sug").innerHTML="";$("#fix").innerHTML=""}
 function newRound(daily){
- stopTimer();guesses=[];found=[];over=false;won=false;endNote="";endMs=0;
- limit=mode===2?(+$("#lim").value)*60000:0;
+ stopTimer();guesses=[];found=[];over=false;won=false;endNote="";endMs=0;newBest=false;limit=0;
+ q3={on:false,ok:0,bad:0,skip:0,log:[]};
  if(mode===1)target=daily?dailyBone():nextTarget();
- $("#timer").textContent=fmt(limit);
+ $("#timer").textContent=fmt(0);
  clearIn();render();
 }
 function accept(e){
@@ -146,8 +176,10 @@ function accept(e){
  const dup=mode===1?guesses.some(g=>g.e===e):found.includes(e);
  if(dup){$("#sug").innerHTML="";$("#fix").textContent="„"+e.n+"“ už si zadal.";return}
  if(mode===1){guesses.push({e,d:e===target?0:dist(e,target)});if(e===target){won=true;over=true}}
- else{startTimer();found.push(e);if(found.length===META.length)finish(true,"")}
- clearIn();render();$("#in").focus();
+ else{startTimer();found.push(e);if(found.length===META.length){clearIn();finish(true,"");return}}
+ clearIn();render();
+ if(mode===1&&won){confetti();showModal("🎉 Správne!","Hľadaná kosť: <b>"+target.n+"</b> ("+target.e+")<br>Počet tipov: <b>"+guesses.length+"</b><br>Chceš ďalšiu hru?",[["Ďalšie kolo",()=>newRound()]])}
+ else $("#in").focus();
 }
 function offer(t,list){
  const fx=$("#fix");fx.textContent=t+" ";
@@ -165,13 +197,38 @@ function enter(){
  if(good.length)offer("Myslel si toto?",good);
  else fx.textContent="Taká kosť neexistuje. Skontroluj latinský názov (aj so stranou: dexter / sinister).";
 }
+/* hra 3 */
+function hint(c,t){
+ const dx=t.c[0]-c.c[0],dy=(t.c[1]-c.c[1])*100,dz=(t.c[2]-c.c[2])*100,d=Math.hypot(dx*100,dy,dz),p=[];
+ if(Math.abs(dy)>3)p.push(dy>0?"vyššie":"nižšie");
+ if(c.c[0]*t.c[0]<0&&Math.abs(t.c[0])>0.02)p.push("na druhej strane tela");
+ else if(Math.abs(Math.abs(t.c[0])-Math.abs(c.c[0]))*100>3)p.push(Math.abs(t.c[0])>Math.abs(c.c[0])?"ďalej od stredu tela":"bližšie k stredu tela");
+ if(Math.abs(dz)>3)p.push(dz>0?"viac vpredu":"viac vzadu");
+ return (d<8?"Už si veľmi blízko! ":d<25?"Si blízko. ":d>60?"Si ešte ďaleko. ":"")+"Hľadaná kosť je "+(p.join(", ")||"hneď vedľa")+".";
+}
+function draw3(){if(!bag3.length)bag3=META.filter(e=>!HID.test(e.n)).sort(()=>Math.random()-.5);return bag3.pop()}
+function start3(){
+ stopTimer();over=false;q3={on:true,ok:0,bad:0,skip:0,log:[],t:draw3()};
+ limit=(+$("#lvl").value)*60000;t0=Date.now();timer=setInterval(tickT,250);tickT();$("#fix").textContent="";render();
+}
+function flash(e,c){e.mat.color.copy(c);e.mat.emissive.copy(c).multiplyScalar(0.5);clearTimeout(ft);ft=setTimeout(recolor,1000)}
+function click3(b){
+ if(!q3.on||over||!b)return;const t=q3.t,fx=$("#fix");
+ if(b===t){q3.ok++;q3.log.unshift(["#2ea44f",t,"správne"]);fx.textContent="✅ Správne!";q3.t=draw3();render();flash(b,GREEN)}
+ else{q3.bad++;q3.log.unshift(["#d04040",b,"zlá kosť"]);fx.textContent="❌ Toto nie je ona (to je "+b.n+"). "+hint(b,t);render();flash(b,RED)}
+}
+function end3(why){
+ if(!q3.on)return;q3.on=false;over=true;stopTimer();render();
+ const n=q3.ok+q3.bad,acc=n?Math.round(q3.ok/n*100):0;
+ showModal(why,"Úroveň: <b>"+$("#lvl").selectedOptions[0].textContent+"</b><br>✅ Správne trafených kostí: <b>"+q3.ok+"</b><br>❌ Kliknutí na zlú kosť: <b>"+q3.bad+"</b><br>⏭ Preskočených: <b>"+q3.skip+"</b><br>🎯 Presnosť: <b>"+acc+" %</b>",[["Hrať znova",()=>newRound()]]);
+}
 function recolor(){
  META.forEach(e=>{e.mat.color.copy(baseCol());e.mat.emissive.setRGB(0,0,0)});
  if(mode===1){
   const last=guesses[guesses.length-1];
   guesses.forEach(g=>{g.e.mat.color.copy(gcol(g.d));g.e.mat.emissive.copy(g.e.mat.color).multiplyScalar(g===last?0.4:0.08)});
   if(over){target.mat.color.set(0xffc93c);target.mat.emissive.set(0x553d00)}
- }else{
+ }else if(mode===2){
   found.forEach((e,i)=>{e.mat.color.copy(GREEN);e.mat.emissive.copy(GREEN).multiplyScalar(i===found.length-1?0.4:0.08)});
   if(over&&!won)META.forEach(e=>{if(!found.includes(e)){e.mat.color.copy(RED);e.mat.emissive.copy(RED).multiplyScalar(0.1)}});
  }
@@ -183,22 +240,29 @@ function render(){
   const sorted=[...guesses].sort((a,b)=>a.d-b.d),last=guesses[guesses.length-1];
   L.innerHTML=sorted.map(g=>row(gcol(g.d).getStyle(),g.e,g.d===0?label(0):Math.round(g.d)+" cm · "+label(g.d)).replace('class="row"','class="row'+(g===last?" last":"")+'"')).join("");
   M.textContent=over?(won?"Správne! ":"")+"Hľadaná kosť: "+target.n+" ("+target.e+"). Tipov: "+guesses.length+".":guesses.length?"Tipov: "+guesses.length+" z "+META.length+" kostí":"Zadaj svoj prvý tip. Skrytých kostí je "+META.length+".";
- }else{
+ }else if(mode===2){
   let h="";
   if(over&&!won){const miss=META.filter(e=>!found.includes(e));h+=`<div class="row"><b>Nepomenované (${miss.length})</b></div>`+miss.map(e=>row("#d04040",e)).join("")}
   h+=[...found].reverse().map(e=>row("#2ea44f",e)).join("");
   L.innerHTML=h;
-  M.textContent=over?(won?"Zvládol si všetkých "+META.length+" za "+fmt(endMs)+"! 🎉":endNote+". Pomenoval si "+found.length+" z "+META.length+" kostí za "+fmt(endMs)+"."):found.length+" z "+META.length+" kostí. Píš latinské názvy, aj so stranou (dexter / sinister).";
+  M.textContent=over?(won?"Zvládol si všetkých "+META.length+" za "+fmt(endMs)+"! "+(newBest?"Nový osobný rekord! 🏆":"🎉"):endNote+". Pomenoval si "+found.length+" z "+META.length+" kostí za "+fmt(endMs)+"."):found.length+" z "+META.length+" kostí. "+(timer||found.length?"":"Stopky sa spustia, keď začneš písať. ")+"Píš latinské názvy, aj so stranou (dexter / sinister).";
+ }else{
+  L.innerHTML=(q3.on||q3.log.length?`<div class="row"><b>✅ ${q3.ok} · ❌ ${q3.bad} · ⏭ ${q3.skip}</b></div>`:"")+q3.log.slice(0,40).map(r=>row(r[0],r[1],r[2])).join("");
+  M.innerHTML=q3.on?`Nájdi a klikni na: <b>${q3.t.n}</b><br><span class="sk">${q3.t.e}</span>`:over?"Hra skončila. Ďalšiu spustíš tlačidlom Začať.":"Vyber úroveň a stlač Začať. Potom klikaj na kosti v 3D modeli.";
  }
+ $("#best").textContent=mode===2&&bestT()?" · najlepší čas: "+fmt(bestT()):"";
  $("#in").disabled=over;recolor();
 }
 function setMode(m){
- mode=m;$("#m1").classList.toggle("on",m===1);$("#m2").classList.toggle("on",m===2);
- $("#bd").style.display=m===1?"":"none";$("#t2").style.display=m===2?"":"none";$("#hardL").style.display=m===1?"":"none";
+ mode=m;[1,2,3].forEach(i=>$("#m"+i).classList.toggle("on",i===m));
+ const sh=(id,v)=>$(id).style.display=v?"":"none";
+ sh("#bd",m===1);sh("#t2",m>1);sh("#hardL",m===1);sh("#box",m!==3);sh("#learnL",m!==3);sh("#lvlW",m===3);sh("#bn",m!==3);sh("#sk",m===3);
+ $("#bg").textContent=m===3?"Skončiť":"Vzdať sa";$("#tip").style.display="none";
+ $("#rt").textContent=GAMES[m][0];$("#rb").innerHTML=GAMES[m][1];
  $("#in").placeholder=m===1?"Napíš latinský názov, napr. Humerus dexter":"Pomenuj kosť a stlač Enter";
  newRound();
 }
-$("#m1").onclick=()=>setMode(1);$("#m2").onclick=()=>setMode(2);
+[1,2,3].forEach(i=>$("#m"+i).onclick=()=>setMode(i));
 $("#in").addEventListener("input",ev=>{
  const ul=$("#sug");ul.innerHTML="";$("#fix").innerHTML="";
  if(mode===2&&!over)startTimer();
@@ -211,15 +275,19 @@ $("#hard").onchange=()=>{$("#sug").innerHTML="";$("#in").dispatchEvent(new Event
 $("#in").addEventListener("keydown",ev=>{if(ev.key==="Enter")enter()});
 $("#bn").onclick=()=>newRound(false);
 $("#bd").onclick=()=>newRound(true);
-$("#bg").onclick=()=>{if(over||!ready)return;if(mode===1){over=true;render()}else finish(false,"Vzdal si sa")};
-$("#lim").onchange=()=>newRound();
+$("#go").onclick=()=>start3();
+$("#sk").onclick=()=>{if(!q3.on)return;const t=q3.t;q3.skip++;q3.log.unshift(["#999",t,"preskočené"]);$("#fix").textContent="⏭ Bola to: "+t.n+" (zlatá).";q3.t=draw3();render();flash(t,GOLD)};
+$("#bg").onclick=()=>{if(over||!ready)return;if(mode===1){over=true;render()}else if(mode===2)finish(false,"Vzdal si sa");else end3("Koniec hry")};
 let down=null;const rc=new THREE.Raycaster();
 renderer.domElement.addEventListener("pointerdown",e=>down=[e.clientX,e.clientY]);
 renderer.domElement.addEventListener("pointerup",e=>{
- if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5||!$("#learn").checked)return;
+ if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5)return;
+ if(mode!==3&&!$("#learn").checked)return;
  const r=renderer.domElement.getBoundingClientRect();
  rc.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-((e.clientY-r.top)/r.height)*2+1),camera);
- const h=rc.intersectObjects(allMeshes)[0],t=$("#tip");
+ const h=rc.intersectObjects(allMeshes)[0];
+ if(mode===3){click3(h&&h.object.userData.e);return}
+ const t=$("#tip");
  if(h){const b=h.object.userData.e;t.textContent=(mode===2&&!over&&!found.includes(b))?"???  (táto kosť ešte nebola pomenovaná)":b.n+" – "+b.e;t.style.display="block"}else t.style.display="none";
 });
 $("#learn").onchange=e=>{if(!e.target.checked)$("#tip").style.display="none"};
